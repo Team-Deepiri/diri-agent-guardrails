@@ -1,0 +1,37 @@
+[tool.poetry]
+name = "diri-agent-guardrails"
+version = "0.1.0"
+description = "Reusable input/output sanitization, PII detection, prompt-injection checks, and policy-driven guardrails for AI agents."
+authors = ["Team Deepiri"]
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "diri_agent_guardrails", from = "src" }]
+include = [{ path = "tests", format = "sdist" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+httpx = { version = "^0.27.0", optional = true }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.24.0"
+ruff = "^0.8.0"
+
+[tool.poetry.extras]
+opa = ["httpx"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
