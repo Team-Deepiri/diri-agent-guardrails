@@ -1,7 +1,6 @@
 """Rate-limit checker with injectable backend.
 
-Consolidates rate-limiting logic previously found in advanced.py and
-renderflow/gates/policy.py.
+Generic rate-limiting logic suitable for any domain.
 """
 from __future__ import annotations
 

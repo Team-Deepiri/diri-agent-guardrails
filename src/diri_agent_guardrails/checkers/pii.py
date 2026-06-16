@@ -1,7 +1,6 @@
 """PII (personally identifiable information) detection checker.
 
-Consolidates patterns previously duplicated across safety.py, advanced.py,
-and renderflow/gates/prompt.py.
+Consolidates patterns previously duplicated across safety.py and advanced.py.
 """
 from __future__ import annotations
 
