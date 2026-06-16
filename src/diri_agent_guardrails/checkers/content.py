@@ -45,7 +45,8 @@ class ContentSafetyChecker:
             return CheckResult(
                 passed=False,
                 verdict=Verdict.BLOCK if score >= 0.6 else Verdict.WARN,
-                reason_code=ReasonCode.SAFETY_BLOCK if score >= 0.6 else ReasonCode.POLICY_VIOLATION,
+                reason_code=ReasonCode.SAFETY_BLOCK if score >= 0.6
+                else ReasonCode.POLICY_VIOLATION,
                 score=score,
                 message=f"Blocked content patterns detected: {len(matches)} match(es)",
                 details={"matched_patterns": matches},

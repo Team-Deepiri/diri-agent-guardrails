@@ -35,7 +35,9 @@ class PIIChecker:
 
     def __init__(self, rules: Sequence[tuple[str, str]] | None = None) -> None:
         raw = list(rules) if rules is not None else _DEFAULT_RULES
-        self._compiled: list[tuple[re.Pattern[str], str]] = [(re.compile(p, re.IGNORECASE), label) for p, label in raw]
+        self._compiled: list[tuple[re.Pattern[str], str]] = [
+            (re.compile(p, re.IGNORECASE), label) for p, label in raw
+        ]
 
     def check(self, text: str, **context: Any) -> CheckResult:
         hits: list[dict[str, Any]] = []

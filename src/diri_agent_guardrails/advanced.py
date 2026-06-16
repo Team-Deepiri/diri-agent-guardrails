@@ -1,5 +1,7 @@
 """
 Advanced guardrails: policies, categories, async checks, rate limits, tool safety.
+
+Uses ``core.engine.GuardrailEngine`` and ``checkers.*`` under the hood.
 """
 from __future__ import annotations
 
@@ -10,6 +12,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
+
+from diri_agent_guardrails.checkers.content import ContentSafetyChecker
+from diri_agent_guardrails.checkers.injection import InjectionChecker
+from diri_agent_guardrails.checkers.pii import PIIChecker
+from diri_agent_guardrails.checkers.rate_limit import RateLimitChecker
+from diri_agent_guardrails.core.interfaces import GuardrailChecker, GuardrailEngine
+from diri_agent_guardrails.core.result import CheckResult
+from diri_agent_guardrails.core.verdict import Verdict as CoreVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +90,95 @@ class GuardrailPolicy:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+_RISK_TO_VERDICT: dict[RiskLevel, CoreVerdict] = {
+    RiskLevel.SAFE: CoreVerdict.ALLOW,
+    RiskLevel.LOW: CoreVerdict.WARN,
+    RiskLevel.MEDIUM: CoreVerdict.WARN,
+    RiskLevel.HIGH: CoreVerdict.BLOCK,
+    RiskLevel.CRITICAL: CoreVerdict.BLOCK,
+}
+
+_ACTION_TO_VERDICT: dict[GuardrailAction, CoreVerdict] = {
+    GuardrailAction.ALLOW: CoreVerdict.ALLOW,
+    GuardrailAction.WARN: CoreVerdict.WARN,
+    GuardrailAction.MODIFY: CoreVerdict.WARN,
+    GuardrailAction.BLOCK: CoreVerdict.BLOCK,
+    GuardrailAction.ESCALATE: CoreVerdict.ESCALATE,
+    GuardrailAction.LOG: CoreVerdict.ALLOW,
+}
+
+_VERDICT_TO_RISK: dict[CoreVerdict, RiskLevel] = {
+    CoreVerdict.ALLOW: RiskLevel.SAFE,
+    CoreVerdict.WARN: RiskLevel.MEDIUM,
+    CoreVerdict.BLOCK: RiskLevel.HIGH,
+    CoreVerdict.REDACT: RiskLevel.MEDIUM,
+    CoreVerdict.ESCALATE: RiskLevel.CRITICAL,
+}
+
+_VERDICT_TO_ACTION: dict[CoreVerdict, GuardrailAction] = {
+    CoreVerdict.ALLOW: GuardrailAction.ALLOW,
+    CoreVerdict.WARN: GuardrailAction.WARN,
+    CoreVerdict.BLOCK: GuardrailAction.BLOCK,
+    CoreVerdict.REDACT: GuardrailAction.BLOCK,
+    CoreVerdict.ESCALATE: GuardrailAction.ESCALATE,
+}
+
+_CATEGORY_PATTERN_POLICIES: dict[GuardrailCategory, str] = {
+    GuardrailCategory.PROMPT_INJECTION: "prompt_injection",
+    GuardrailCategory.CONTENT_SAFETY: "harmful_content",
+    GuardrailCategory.DATA_PRIVACY: "pii_detection",
+    GuardrailCategory.ETHICAL: "ethical_guidelines",
+}
+
+_CATEGORY_CHECKERS: dict[GuardrailCategory, GuardrailChecker] = {
+    GuardrailCategory.PROMPT_INJECTION: InjectionChecker(),
+    GuardrailCategory.CONTENT_SAFETY: ContentSafetyChecker(),
+    GuardrailCategory.DATA_PRIVACY: PIIChecker(),
+    GuardrailCategory.ETHICAL: ContentSafetyChecker(
+        patterns=[
+            r"\b(?:discriminate|hate|racist|sexist)\b",
+            r"\b(?:illegal|fraudulent|scam)\s+(?:activity|scheme)",
+        ]
+    ),
+}
+
+
+def _checkresult_to_guardrailresult(
+    cr: CheckResult,
+    category: GuardrailCategory = GuardrailCategory.CONTENT_SAFETY,
+) -> GuardrailResult:
+    risk = _VERDICT_TO_RISK.get(cr.verdict, RiskLevel.MEDIUM)
+    action = _VERDICT_TO_ACTION.get(cr.verdict, GuardrailAction.WARN)
+    return GuardrailResult(
+        passed=cr.passed,
+        risk_level=risk,
+        action=action,
+        category=category,
+        message=cr.message,
+        details=cr.details,
+        modified_content=cr.modified_content,
+        timestamp=cr.timestamp,
+    )
+
+
+def _guardrailresult_to_checkresult(gr: GuardrailResult) -> CheckResult:
+    verdict = _ACTION_TO_VERDICT.get(gr.action, CoreVerdict.WARN)
+    return CheckResult(
+        passed=gr.passed,
+        verdict=verdict,
+        score=gr.risk_level.value,
+        message=gr.message,
+        details=gr.details,
+        modified_content=gr.modified_content,
+    )
+
+
 class AdvancedGuardrails:
     """
     Policy-driven guardrails: content safety, prompt injection, PII/data privacy,
     output validation, rate limiting, tool safety, and context boundaries.
+
+    Uses ``core.engine.GuardrailEngine`` and ``checkers.*`` for all pattern-based checks.
     """
 
     def __init__(self) -> None:
@@ -92,6 +187,8 @@ class AdvancedGuardrails:
         self._rate_limits: Dict[str, Dict[str, Any]] = {}
         self._blocked_tools: Set[str] = set()
         self.logger = logger
+        self._engine = GuardrailEngine({})
+        self._rate_checker = RateLimitChecker()
         self._initialize_default_policies()
 
     def _initialize_default_policies(self) -> None:
@@ -187,6 +284,11 @@ class AdvancedGuardrails:
             )
         )
 
+        for category in _CATEGORY_CHECKERS:
+            policy_name = _CATEGORY_PATTERN_POLICIES.get(category)
+            if policy_name and policy_name in self.policies:
+                self._engine.add_checker(policy_name, _CATEGORY_CHECKERS[category])
+
     def add_policy(self, policy: GuardrailPolicy) -> None:
         self.policies[policy.name] = policy
         if policy.patterns:
@@ -198,6 +300,7 @@ class AdvancedGuardrails:
     def reload_policies(self) -> None:
         self.policies.clear()
         self._compiled_patterns.clear()
+        self._engine = GuardrailEngine({})
         self._initialize_default_policies()
         self.logger.info("Guardrail policies reloaded")
 
@@ -215,7 +318,7 @@ class AdvancedGuardrails:
         context: Optional[Dict[str, Any]] = None,
         user_id: Optional[str] = None,
     ) -> GuardrailResult:
-        del context, user_id  # reserved for future policy hooks
+        del context, user_id
         results: List[GuardrailResult] = []
 
         for policy_name, policy in self.policies.items():
@@ -369,37 +472,17 @@ class AdvancedGuardrails:
         limit: int = 100,
         window_seconds: int = 60,
     ) -> GuardrailResult:
-        key = f"{user_id}:{action}"
-        now = datetime.now(timezone.utc)
-
-        if key not in self._rate_limits:
-            self._rate_limits[key] = {"count": 0, "window_start": now}
-
-        rate_info = self._rate_limits[key]
-        if (now - rate_info["window_start"]).total_seconds() > window_seconds:
-            rate_info["count"] = 0
-            rate_info["window_start"] = now
-
-        rate_info["count"] += 1
-
-        if rate_info["count"] > limit:
-            return GuardrailResult(
-                passed=False,
-                risk_level=RiskLevel.MEDIUM,
-                action=GuardrailAction.BLOCK,
-                category=GuardrailCategory.RATE_LIMITING,
-                message=f"Rate limit exceeded: {rate_info['count']}/{limit} in {window_seconds}s",
-                details={
-                    "current_count": rate_info["count"],
-                    "limit": limit,
-                    "window_seconds": window_seconds,
-                },
-            )
-
+        cr = self._rate_checker.check(
+            key=f"{user_id}:{action}",
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+        if not cr.passed:
+            return _checkresult_to_guardrailresult(cr, category=GuardrailCategory.RATE_LIMITING)
         return GuardrailResult(
             passed=True,
             action=GuardrailAction.ALLOW,
-            details={"remaining": limit - rate_info["count"]},
+            details=cr.details,
         )
 
     async def check_context_boundary(

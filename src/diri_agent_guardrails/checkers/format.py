@@ -6,7 +6,7 @@ length, expected type).
 from __future__ import annotations
 
 import json
-from typing import Any, Type
+from typing import Any
 
 from diri_agent_guardrails.core.result import CheckResult
 from diri_agent_guardrails.core.verdict import ReasonCode, Verdict
