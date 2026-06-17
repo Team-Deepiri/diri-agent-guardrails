@@ -4,6 +4,7 @@ Generic rate-limiting logic suitable for any domain.
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
@@ -22,24 +23,30 @@ class InMemoryRateLimitBackend:
 
     def __init__(self) -> None:
         self._store: dict[str, dict] = {}
+        self._lock = threading.Lock()
 
     def check_and_increment(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
         now = datetime.now(timezone.utc)
-        if key not in self._store:
-            self._store[key] = {"count": 0, "window_start": now}
+        with self._lock:
+            if key not in self._store:
+                self._store[key] = {"count": 0, "window_start": now}
 
-        info = self._store[key]
-        if (now - info["window_start"]).total_seconds() > window_seconds:
-            info["count"] = 0
-            info["window_start"] = now
+            info = self._store[key]
+            if (now - info["window_start"]).total_seconds() > window_seconds:
+                info["count"] = 0
+                info["window_start"] = now
 
-        info["count"] += 1
-        within_limit = info["count"] <= limit
-        return within_limit, info["count"]
+            info["count"] += 1
+            within_limit = info["count"] <= limit
+            return within_limit, info["count"]
 
 
 class RateLimitChecker:
     """Check whether an action has exceeded its rate limit.
+
+    Satisfies the ``GuardrailChecker`` protocol — pass ``key``, ``limit``, and
+    ``window_seconds`` via ``**context``. If ``key`` is omitted, the first 64
+    characters of ``text`` are used as the key.
 
     Parameters
     ----------
@@ -51,13 +58,11 @@ class RateLimitChecker:
     def __init__(self, backend: RateLimitBackend | None = None) -> None:
         self._backend = backend or InMemoryRateLimitBackend()
 
-    def check(
-        self,
-        key: str,
-        limit: int = 100,
-        window_seconds: int = 60,
-        **context: Any,
-    ) -> CheckResult:
+    def check(self, text: str, **context: Any) -> CheckResult:
+        key = str(context.get("key", text[:64]))
+        limit = int(context.get("limit", 100))
+        window_seconds = int(context.get("window_seconds", 60))
+
         within_limit, count = self._backend.check_and_increment(key, limit, window_seconds)
         if not within_limit:
             return CheckResult(

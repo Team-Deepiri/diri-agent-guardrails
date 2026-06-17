@@ -26,54 +26,48 @@ class FormatChecker:
 
     def check(self, text: str, **context: Any) -> CheckResult:
         checks: list[CheckResult] = []
-        max_score = 0.0
 
         if self._max_length is not None and len(text) > self._max_length:
-            result = CheckResult(
+            checks.append(CheckResult(
                 passed=False,
                 verdict=Verdict.WARN,
                 reason_code=ReasonCode.INPUT_TOO_LONG,
                 score=0.5,
                 message=f"Output exceeds max length: {len(text)} > {self._max_length}",
                 details={"length": len(text), "limit": self._max_length},
-            )
-            checks.append(result)
-            max_score = max(max_score, result.score)
+            ))
 
         expected_format = context.get("expected_format")
         if expected_format == "json":
             try:
                 json.loads(text)
             except json.JSONDecodeError as e:
-                result = CheckResult(
+                checks.append(CheckResult(
                     passed=False,
                     verdict=Verdict.WARN,
                     reason_code=ReasonCode.OUTPUT_INVALID,
                     score=0.3,
                     message=f"Output is not valid JSON: {e}",
-                )
-                checks.append(result)
-                max_score = max(max_score, result.score)
+                ))
 
         expected_type = context.get("expected_type")
         if expected_type is not None and not isinstance(text, expected_type):
-            result = CheckResult(
+            checks.append(CheckResult(
                 passed=False,
                 verdict=Verdict.WARN,
                 reason_code=ReasonCode.OUTPUT_INVALID,
                 score=0.4,
                 message=f"Output type mismatch: expected {expected_type}, got {type(text)}",
-            )
-            checks.append(result)
-            max_score = max(max_score, result.score)
-            _ = text
+            ))
 
-        if max_score >= 0.5:
+        if checks:
+            worst = max(checks, key=lambda c: c.score)
             return CheckResult(
                 passed=False,
-                verdict=Verdict.WARN,
-                reason_code=ReasonCode.OUTPUT_INVALID,
-                score=max_score,
+                verdict=worst.verdict,
+                reason_code=worst.reason_code,
+                score=worst.score,
+                message=worst.message,
                 details={"checks": [c.to_dict() for c in checks]},
             )
 

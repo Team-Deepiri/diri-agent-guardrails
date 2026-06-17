@@ -1,6 +1,7 @@
 """Abstract guardrail primitives -- protocols and base classes."""
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
@@ -49,7 +50,7 @@ class GuardrailEngine:
         return worst if worst is not None else CheckResult()
 
     async def async_check(self, text: str, **context: Any) -> CheckResult:
-        return self.check(text, **context)
+        return await asyncio.to_thread(self.check, text, **context)
 
     def add_checker(self, name: str, checker: GuardrailChecker) -> None:
         self._checkers[name] = checker

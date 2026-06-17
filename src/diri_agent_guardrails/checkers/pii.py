@@ -14,7 +14,6 @@ _DEFAULT_RULES: list[tuple[str, str]] = [
     (r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b", "phone"),
     (r"\b\d{3}-\d{2}-\d{4}\b", "ssn"),
     (r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b", "credit_card"),
-    (r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b", "credit_card"),
     (r"\b(?:password|passwd|pwd)\s*[:=]\s*\S+", "credential"),
     (r"\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*\S+", "credential"),
     (r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", "email"),

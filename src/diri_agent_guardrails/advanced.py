@@ -21,6 +21,9 @@ from diri_agent_guardrails.core.interfaces import GuardrailChecker, GuardrailEng
 from diri_agent_guardrails.core.result import CheckResult
 from diri_agent_guardrails.core.verdict import Verdict as CoreVerdict
 
+# Checker class to use when building engine checkers from policy patterns
+_CATEGORY_CHECKER_CLASS: dict[Any, type] = {}  # populated after GuardrailCategory is defined
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +80,8 @@ class GuardrailResult:
 
 
 @dataclass
-class GuardrailPolicy:
+class PolicyConfig:
+    """Policy configuration dataclass. Use this to define guardrail policies."""
     name: str
     category: GuardrailCategory
     enabled: bool = True
@@ -89,6 +93,25 @@ class GuardrailPolicy:
     custom_check: Optional[Callable[..., Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+
+# Backward-compatible alias — prefer PolicyConfig in new code
+GuardrailPolicy = PolicyConfig
+
+
+_CATEGORY_CHECKER_CLASS.update({
+    GuardrailCategory.PROMPT_INJECTION: InjectionChecker,
+    GuardrailCategory.CONTENT_SAFETY: ContentSafetyChecker,
+    GuardrailCategory.DATA_PRIVACY: PIIChecker,
+    GuardrailCategory.ETHICAL: ContentSafetyChecker,
+})
+
+_RISK_TO_SCORE: dict[RiskLevel, float] = {
+    RiskLevel.SAFE: 0.0,
+    RiskLevel.LOW: 0.3,
+    RiskLevel.MEDIUM: 0.5,
+    RiskLevel.HIGH: 0.8,
+    RiskLevel.CRITICAL: 1.0,
+}
 
 _RISK_TO_VERDICT: dict[RiskLevel, CoreVerdict] = {
     RiskLevel.SAFE: CoreVerdict.ALLOW,
@@ -166,7 +189,7 @@ def _guardrailresult_to_checkresult(gr: GuardrailResult) -> CheckResult:
     return CheckResult(
         passed=gr.passed,
         verdict=verdict,
-        score=gr.risk_level.value,
+        score=_RISK_TO_SCORE.get(gr.risk_level, 0.5),
         message=gr.message,
         details=gr.details,
         modified_content=gr.modified_content,
@@ -289,12 +312,19 @@ class AdvancedGuardrails:
             if policy_name and policy_name in self.policies:
                 self._engine.add_checker(policy_name, _CATEGORY_CHECKERS[category])
 
-    def add_policy(self, policy: GuardrailPolicy) -> None:
+    def add_policy(self, policy: PolicyConfig) -> None:
         self.policies[policy.name] = policy
-        if policy.patterns:
-            self._compiled_patterns[policy.name] = [
-                re.compile(p, re.IGNORECASE) for p in policy.patterns
-            ]
+        checker_cls = _CATEGORY_CHECKER_CLASS.get(policy.category)
+        if checker_cls is not None:
+            if policy.patterns and policy.category != GuardrailCategory.DATA_PRIVACY:
+                # PIIChecker uses (pattern, label) tuples — can't build from plain strings,
+                # so DATA_PRIVACY always falls back to the default PIIChecker.
+                self._compiled_patterns[policy.name] = [
+                    re.compile(p, re.IGNORECASE) for p in policy.patterns
+                ]
+                self._engine.add_checker(policy.name, checker_cls(policy.patterns))
+            else:
+                self._engine.add_checker(policy.name, checker_cls())
         self.logger.info("Added guardrail policy: %s", policy.name)
 
     def reload_policies(self) -> None:
@@ -307,6 +337,7 @@ class AdvancedGuardrails:
     def remove_policy(self, policy_name: str) -> None:
         self.policies.pop(policy_name, None)
         self._compiled_patterns.pop(policy_name, None)
+        self._engine.remove_checker(policy_name)
 
     def enable_policy(self, policy_name: str, enabled: bool = True) -> None:
         if policy_name in self.policies:
@@ -319,33 +350,9 @@ class AdvancedGuardrails:
         user_id: Optional[str] = None,
     ) -> GuardrailResult:
         del context, user_id
-        results: List[GuardrailResult] = []
-
-        for policy_name, policy in self.policies.items():
-            if not policy.enabled:
-                continue
-            if policy.category in (
-                GuardrailCategory.PROMPT_INJECTION,
-                GuardrailCategory.CONTENT_SAFETY,
-                GuardrailCategory.DATA_PRIVACY,
-                GuardrailCategory.ETHICAL,
-            ):
-                result = await self._check_patterns(input_text, policy)
-                if not result.passed:
-                    results.append(result)
-
-        if results:
-            risk_order = [
-                RiskLevel.CRITICAL,
-                RiskLevel.HIGH,
-                RiskLevel.MEDIUM,
-                RiskLevel.LOW,
-            ]
-            results.sort(
-                key=lambda r: risk_order.index(r.risk_level) if r.risk_level in risk_order else 99
-            )
-            return results[0]
-
+        cr = await self._engine.async_check(input_text)
+        if not cr.passed:
+            return _checkresult_to_guardrailresult(cr)
         return GuardrailResult(
             passed=True,
             risk_level=RiskLevel.SAFE,
