@@ -1,15 +1,22 @@
 """
 Classic safety guardrails: prompt injection, blocked content, PII, output checks.
+
+Delegates to the ``checkers`` module for all detection logic.
+This module exists for backward compatibility; new code should use
+``checkers`` directly.
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Type
+
+from diri_agent_guardrails.checkers.content import ContentSafetyChecker
+from diri_agent_guardrails.checkers.format import FormatChecker
+from diri_agent_guardrails.checkers.injection import InjectionChecker
+from diri_agent_guardrails.checkers.pii import PIIChecker
 
 logger = logging.getLogger(__name__)
 
@@ -32,39 +39,16 @@ class SafetyCheckResult:
 class SafetyGuardrails:
     """
     Content filtering, prompt injection detection, and output validation for AI interactions.
+
+    Backward-compatible wrapper around the ``checkers.*`` consolidated validators.
     """
 
     def __init__(self) -> None:
         self.logger = logger
-        self.blocked_patterns = self._load_blocked_patterns()
-        self.pii_patterns = self._load_pii_patterns()
-        self.injection_patterns = self._load_injection_patterns()
-
-    def _load_blocked_patterns(self) -> List[re.Pattern[str]]:
-        return [
-            re.compile(r"\b(?:explicit|nsfw|adult)\b", re.IGNORECASE),
-            re.compile(r"\b(?:violence|harm|kill|attack)\b", re.IGNORECASE),
-            re.compile(r"\b(?:hate|discriminate|slur)\b", re.IGNORECASE),
-        ]
-
-    def _load_pii_patterns(self) -> List[Tuple[re.Pattern[str], str]]:
-        return [
-            (re.compile(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"), "phone"),
-            (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "ssn"),
-            (re.compile(r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b"), "credit_card"),
-        ]
-
-    def _load_injection_patterns(self) -> List[re.Pattern[str]]:
-        return [
-            # "ignore previous …", "ignore all previous …", "ignore above …"
-            re.compile(
-                r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?",
-                re.IGNORECASE,
-            ),
-            re.compile(r"system\s*:\s*", re.IGNORECASE),
-            re.compile(r"new\s+instructions?", re.IGNORECASE),
-            re.compile(r"jailbreak|bypass|override", re.IGNORECASE),
-        ]
+        self._injection = InjectionChecker()
+        self._content = ContentSafetyChecker()
+        self._pii = PIIChecker()
+        self._format = FormatChecker()
 
     def check_prompt(self, prompt: str, user_id: Optional[str] = None) -> SafetyCheckResult:
         checks: List[SafetyCheckResult] = []
@@ -105,20 +89,14 @@ class SafetyGuardrails:
         )
 
     def _check_prompt_injection(self, prompt: str) -> SafetyCheckResult:
-        matches: List[str] = []
-        for pattern in self.injection_patterns:
-            if pattern.search(prompt):
-                matches.append(pattern.pattern)
-
-        if matches:
-            score = min(0.9, 0.5 + len(matches) * 0.1)
+        result = self._injection.check(prompt)
+        if not result.passed:
             return SafetyCheckResult(
                 level=SafetyLevel.BLOCKED,
-                message=f"Potential prompt injection detected: {len(matches)} patterns matched",
-                score=score,
-                details={"matched_patterns": matches},
+                message=result.message,
+                score=result.score,
+                details=result.details,
             )
-
         return SafetyCheckResult(
             level=SafetyLevel.SAFE,
             message="No prompt injection detected",
@@ -126,20 +104,15 @@ class SafetyGuardrails:
         )
 
     def _check_blocked_content(self, text: str) -> SafetyCheckResult:
-        matches: List[str] = []
-        for pattern in self.blocked_patterns:
-            if pattern.search(text):
-                matches.append(pattern.pattern)
-
-        if matches:
-            score = min(0.8, 0.4 + len(matches) * 0.2)
+        result = self._content.check(text)
+        if not result.passed:
+            is_block = result.verdict.value == "block"
             return SafetyCheckResult(
-                level=SafetyLevel.WARNING if score < 0.6 else SafetyLevel.BLOCKED,
-                message=f"Blocked content patterns detected: {len(matches)} matches",
-                score=score,
-                details={"matched_patterns": matches},
+                level=SafetyLevel.BLOCKED if is_block else SafetyLevel.WARNING,
+                message=result.message,
+                score=result.score,
+                details=result.details,
             )
-
         return SafetyCheckResult(
             level=SafetyLevel.SAFE,
             message="No blocked content detected",
@@ -147,27 +120,14 @@ class SafetyGuardrails:
         )
 
     def _check_pii(self, text: str) -> SafetyCheckResult:
-        found_pii: List[Dict[str, Any]] = []
-        for pattern, pii_type in self.pii_patterns:
-            matches = pattern.findall(text)
-            if matches:
-                found_pii.append(
-                    {
-                        "type": pii_type,
-                        "count": len(matches),
-                        "samples": matches[:3],
-                    }
-                )
-
-        if found_pii:
-            score = min(0.7, 0.3 + len(found_pii) * 0.2)
+        result = self._pii.check(text)
+        if not result.passed:
             return SafetyCheckResult(
                 level=SafetyLevel.WARNING,
-                message=f"PII detected: {len(found_pii)} types",
-                score=score,
-                details={"pii_types": found_pii},
+                message=result.message,
+                score=result.score,
+                details=result.details,
             )
-
         return SafetyCheckResult(
             level=SafetyLevel.SAFE,
             message="No PII detected",
@@ -193,22 +153,21 @@ class SafetyGuardrails:
             )
             max_score = 0.5
 
+        fmt_result = self._format.check(output, expected_format=expected_format)
+        if not fmt_result.passed:
+            checks.append(
+                SafetyCheckResult(
+                    level=SafetyLevel.WARNING,
+                    message=fmt_result.message,
+                    score=fmt_result.score,
+                    details=fmt_result.details,
+                )
+            )
+            max_score = max(max_score, fmt_result.score)
+
         content_result = self._check_blocked_content(output)
         checks.append(content_result)
         max_score = max(max_score, content_result.score)
-
-        if expected_format == "json":
-            try:
-                json.loads(output)
-            except json.JSONDecodeError:
-                checks.append(
-                    SafetyCheckResult(
-                        level=SafetyLevel.WARNING,
-                        message="Output is not valid JSON",
-                        score=0.3,
-                    )
-                )
-                max_score = max(max_score, 0.3)
 
         if max_score >= 0.6:
             level = SafetyLevel.BLOCKED
