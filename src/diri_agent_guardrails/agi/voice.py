@@ -10,7 +10,7 @@ from diri_agent_guardrails.core.interfaces import GuardrailEngine
 def build_voice_guardrail_engine() -> GuardrailEngine:
     """Standard engine for artifact voice queries: injection + persona + citation gate."""
     return GuardrailEngine(
-        {
+        checkers={
             "injection": InjectionChecker(),
             "persona_scope": PersonaScopeChecker(),
             "citation_gate": CitationGateChecker(),
