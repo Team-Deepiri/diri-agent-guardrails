@@ -22,6 +22,7 @@ from diri_agent_guardrails.advanced import (
     get_advanced_guardrails,
     reload_guardrails,
 )
+from diri_agent_guardrails.checkers.citation_gate import CitationGateChecker, PersonaScopeChecker
 from diri_agent_guardrails.checkers.content import ContentSafetyChecker
 from diri_agent_guardrails.checkers.format import FormatChecker
 from diri_agent_guardrails.checkers.injection import InjectionChecker
@@ -49,6 +50,7 @@ __all__ = [
     "AdvancedGuardrails",
     "AsyncPostgresClient",
     "CheckResult",
+    "CitationGateChecker",
     "ContentSafetyChecker",
     "CoreGuardrailPolicy",
     "EnhancedGuardrails",
@@ -63,6 +65,7 @@ __all__ = [
     "GuardrailRule",
     "InMemoryRateLimitBackend",
     "InjectionChecker",
+    "PersonaScopeChecker",
     "PIIChecker",
     "RateLimitChecker",
     "ReasonCode",
@@ -78,4 +81,4 @@ __all__ = [
     "reset_enhanced_guardrails",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
