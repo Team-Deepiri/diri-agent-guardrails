@@ -60,6 +60,31 @@ g = await get_enhanced_guardrails(postgres=await get_postgres_manager(), schema=
 summary = await g.check(text)
 ```
 
+**Tool calls (permissions, sandbox, HITL, audit)**
+
+```python
+from diri_agent_guardrails import ToolCallRequest, ToolGate, Verdict
+
+gate = ToolGate()  # deny-by-default catalog aligned with diri-agent-toolbox
+result = gate.authorize(
+    ToolCallRequest(
+        tool_name="file_write",
+        parameters={"relative_path": "out.txt", "content": "hi"},
+        sandboxed=True,
+        scopes=frozenset({"files:write"}),
+    )
+)
+if result.verdict.value != "allow":
+    # BLOCK = refuse; ESCALATE = wait for a human, then retry with approved=True
+    ...
+```
+
+Low-risk data tools (`calculate`, `json_parse`, …) are allowed without extra
+scopes. File, HTTP, calendar, CRM, and DB tools require scopes; file tools
+require the host to attest a sandbox; writes / HTTP POST / DB execute require
+human approval. Unknown names and shell/eval aliases are always denied.
+Authorize decisions are appended to an in-memory audit log (`gate.audit`).
+
 **OPA (optional)**
 
 ```python
@@ -79,6 +104,7 @@ result = await evaluate_opa(
 | `advanced` | `AdvancedGuardrails` — policies, categories, async API |
 | `enhanced` | `EnhancedGuardrails` — rules + optional DB persistence |
 | `opa` | `evaluate_opa` — call OPA `/v1/data/...` (needs `[opa]`) |
+| `tools` | `ToolGate` — deny-by-default tool permissions, sandbox attestation, least-privilege scopes, human approval, audit |
 
 ## Relationship to Cyrex
 
