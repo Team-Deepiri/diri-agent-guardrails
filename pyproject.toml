@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "diri-agent-guardrails"
-version = "0.1.0"
+version = "0.1.2"
 description = "Reusable input/output sanitization, PII detection, prompt-injection checks, and policy-driven guardrails for AI agents."
 authors = ["Team Deepiri"]
 readme = "README.md"
