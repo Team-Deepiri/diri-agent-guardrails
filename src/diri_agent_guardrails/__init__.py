@@ -9,6 +9,7 @@ Submodules:
 - ``advanced`` — ``AdvancedGuardrails`` with policies (async)
 - ``enhanced`` — rule-based ``EnhancedGuardrails`` with optional Postgres
 - ``opa`` — optional OPA REST client (requires ``[opa]`` extra)
+- ``tools`` — tool-side gate (permissions, sandbox, least privilege, HITL, audit)
 """
 
 from diri_agent_guardrails.advanced import (
@@ -44,6 +45,17 @@ from diri_agent_guardrails.safety import (
     SafetyLevel,
     get_guardrails,
 )
+from diri_agent_guardrails.tools import (
+    InMemoryAuditLog,
+    ToolAuditEvent,
+    ToolCallRequest,
+    ToolGate,
+    ToolPermission,
+    ToolPolicy,
+    ToolRisk,
+    default_tool_policy,
+    path_escapes_sandbox,
+)
 
 __all__ = [
     "AdvancedGuardrails",
@@ -61,9 +73,16 @@ __all__ = [
     "GuardrailResult",
     "PolicyConfig",
     "GuardrailRule",
+    "InMemoryAuditLog",
     "InMemoryRateLimitBackend",
     "InjectionChecker",
     "PIIChecker",
+    "ToolAuditEvent",
+    "ToolCallRequest",
+    "ToolGate",
+    "ToolPermission",
+    "ToolPolicy",
+    "ToolRisk",
     "RateLimitChecker",
     "ReasonCode",
     "RiskLevel",
@@ -73,7 +92,9 @@ __all__ = [
     "Verdict",
     "get_advanced_guardrails",
     "get_enhanced_guardrails",
+    "default_tool_policy",
     "get_guardrails",
+    "path_escapes_sandbox",
     "reload_guardrails",
     "reset_enhanced_guardrails",
 ]
