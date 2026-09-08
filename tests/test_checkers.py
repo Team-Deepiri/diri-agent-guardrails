@@ -9,7 +9,6 @@ from diri_agent_guardrails.checkers.rate_limit import InMemoryRateLimitBackend, 
 from diri_agent_guardrails.core.interfaces import GuardrailEngine
 from diri_agent_guardrails.core.verdict import Verdict
 
-
 # ---------------------------------------------------------------------------
 # InjectionChecker
 # ---------------------------------------------------------------------------
