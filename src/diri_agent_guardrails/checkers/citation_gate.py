@@ -47,7 +47,6 @@ class CitationGateChecker:
                 details={"question": context.get("question", text)},
             )
 
-        question = str(context.get("question") or text)
         quotes = [_normalize_quote(str(s.get("quote", ""))) for s in spans if s.get("quote")]
         if not quotes:
             return CheckResult(
